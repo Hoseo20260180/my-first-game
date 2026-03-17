@@ -53,8 +53,15 @@ while running: #실행 중이라면.
 
     screen.fill((50,50,50))# RGB 배경색. # 기본은 검정.
 
-    pygame.draw.circle(screen, (255,0,0), (x, y), radius)
-    #pygame.draw.circle(screen, 색깔, (X좌표, Y좌표), 원크기)
+    points = [
+    (x, y - radius),  # 위
+    (x + radius, y),  # 오른쪽
+    (x, y + radius),  # 아래
+    (x - radius, y)   # 왼쪽
+    ]
+
+    pygame.draw.polygon(screen, (255, 0, 0), points)
+    
 
     # FPS 계산
     fps = clock.get_fps()
