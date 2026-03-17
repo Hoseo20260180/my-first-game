@@ -42,14 +42,27 @@ while running: #실행 중이라면.
         y += speed
 
     #원이 테두리를 넘지 못함.
+    hit = False
     if x < radius:
         x = radius
+        hit = True
     if x > 1200 - radius:
         x = 1200 - radius
+        hit = True
     if y < radius:
         y = radius
+        hit = True
     if y > 800 - radius:
         y = 800 - radius
+        hit = True
+
+    if hit and not was_hit:
+        radius+=5
+
+    was_hit=hit
+
+    if radius>200:
+        radius=200
 
     screen.fill((50,50,50))# RGB 배경색. # 기본은 검정.
 
@@ -58,7 +71,7 @@ while running: #실행 중이라면.
     (x + radius, y),  # 오른쪽
     (x, y + radius),  # 아래
     (x - radius, y)   # 왼쪽
-    ]
+]
 
     pygame.draw.polygon(screen, (255, 0, 0), points)
     
