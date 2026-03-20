@@ -18,9 +18,9 @@ pygame.display.flip() → 화면 업데이트
 원 그리기====================================
 pygame.draw.circle(screen, 색, (x, y), 반지름) → 원 그리기
 
-코드 수정을 통해 
+<코드 수정을 통해 
 screen.fill()의 색이 배경색을 정하며 기본값은 검정이란 것을 알게 됨.
-clock.tick()가 FPS이 된다는 것을 암.
+clock.tick()가 FPS이 된다는 것을 암.>
 
 입력<<pygame 실행할 때 FPS가 출력되도록 해줘
 
@@ -56,4 +56,7 @@ if y < radius:
 if y > 800 - radius:
     y = 800 - radius
 
+→ 반지름 값만큼 화면의 끝에서 멀어지게 함.
+
+AI<<도형이 화면 끝에 닿을 때 크기가 커지게 해줘
 
