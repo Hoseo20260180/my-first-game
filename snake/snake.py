@@ -1,8 +1,16 @@
 import pygame
 import random
-import sys
+import sys, os
+
+def resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(__file__)
+    return os.path.join(base, relative_path)
 
 pygame.init()
+pygame.mixer.init()
 
 # ------------------ 설정 ------------------
 CELL = 30
@@ -13,347 +21,320 @@ WIDTH = CELL * GRID_WIDTH
 HEIGHT = CELL * GRID_HEIGHT
 
 BASE_SPEED = 10
-WIN_LENGTH = 25
+MAX_SPEED = 18
 
-POISON_COUNT = 3
-SPEED_COUNT = 2
-SLOW_COUNT = 2
+ITEM_SCALE = int(CELL * 1.6)
+SPEED_UP_TIME = 4000
+MARGIN = 1
+
+SLOW_DURATION = 5000
+SLOW_FACTOR = 0.45
+
+WIN_LENGTH = 25
 
 # ------------------ 화면 ------------------
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Snake")
+pygame.display.set_caption("GROW SNAKE GROW")
 clock = pygame.time.Clock()
 
-# ------------------ 이미지 (투명 처리) ------------------
-apple_img = pygame.image.load("asset/apple.png").convert_alpha()
-apple_img = pygame.transform.scale(apple_img, (CELL, CELL))
+# ------------------ 배경 ------------------
+background_img = pygame.image.load(resource_path("asset\grass_background.jpg")).convert()
+background_img = pygame.transform.scale(background_img, (WIDTH, HEIGHT))
 
-poison_img = pygame.image.load("asset/poison_apple.png").convert_alpha()
-poison_img = pygame.transform.scale(poison_img, (CELL, CELL))
+# ------------------ 사운드 ------------------
+eat_sound = pygame.mixer.Sound(resource_path("asset\eating_apple.mp3"))
+slowdown_sound = pygame.mixer.Sound(resource_path("asset\slowdown.mp3"))
 
-fast_img = pygame.image.load("asset/fast_time.png").convert_alpha()
-fast_img = pygame.transform.scale(fast_img, (CELL, CELL))
+bgm = pygame.mixer.Sound(resource_path("asset\\retro_arcade_bgm_music.mp3"))
+bgm.set_volume(0.2)
 
-slow_img = pygame.image.load("asset/snail_time.png").convert_alpha()
-slow_img = pygame.transform.scale(slow_img, (CELL, CELL))
+# ------------------ 이미지 ------------------
+def load_img(path):
+    return pygame.transform.scale(
+        pygame.image.load(path).convert_alpha(),
+        (ITEM_SCALE, ITEM_SCALE)
+    )
 
-hole_img = pygame.image.load("asset/Hole.png").convert_alpha()
+apple_img = load_img(resource_path("asset\\apple.png"))
+poison_img = load_img(resource_path("asset\poison_apple.png"))
+slow_img = load_img(resource_path("asset\snail_time.png"))
 
 # ------------------ 색상 ------------------
 WHITE = (255,255,255)
 BLACK = (0,0,0)
-GREEN = (50,200,50)
-DARK = (30,150,30)
-RED = (220,50,50)
+GREEN = (0,150,0)
+HEAD = (0,255,0)
 GRAY = (40,40,40)
-GRID = (70,70,70)
-YELLOW = (240,220,70)
 
 # ------------------ 폰트 ------------------
-def font(size):
-    for n in ["malgungothic","applegothic","nanumgothic","notosanscjk"]:
-        f = pygame.font.SysFont(n,size)
-        if f.get_ascent()>0:
-            return f
-    return pygame.font.SysFont(None,size)
+font = pygame.font.SysFont("malgungothic", 28)
+big_font = pygame.font.SysFont("malgungothic", 60)
 
-F = font(30)
-FB = font(64)
-
-# ------------------ 유틸 ------------------
-def rand_pos():
-    return (
-        random.randint(0,GRID_WIDTH-1)*CELL,
-        random.randint(0,GRID_HEIGHT-1)*CELL
-    )
-
-def near_player(pos,snake):
-    h=snake[0]
-    for dx in range(-2,3):
-        for dy in range(-2,3):
-            if pos==(h[0]+dx*CELL,h[1]+dy*CELL):
-                return True
-    return False
-
-def occupied(snake,food,poisons,speed_items,slow_items):
-    occ=set()
-    occ.add(food)
-    occ.update(poisons)
-    occ.update(speed_items)
-    occ.update(slow_items)
-    occ.update(snake)
-    return occ
-
-def new_items(n,snake,occ):
-    arr=[]
-    while len(arr)<n:
-        p=rand_pos()
-        if p not in snake and p not in occ:
-            arr.append(p)
-    return arr
-
-# ------------------ 구멍 ------------------
-def create_hole(snake,food,poisons,speed_items,slow_items):
-    occ=occupied(snake,food,poisons,speed_items,slow_items)
-
-    while True:
-        h=random.randint(2,4)*CELL
-        w=random.randint(max(3,h//CELL+1),7)*CELL
-
-        x=random.randint(1,GRID_WIDTH-w//CELL-1)*CELL
-        y=random.randint(2,GRID_HEIGHT-3)*CELL
-
-        hole=pygame.Rect(x,y,w,h)
-
-        if near_player((x,y),snake):
-            continue
-
-        if any(hole.collidepoint(p) for p in occ):
-            continue
-
-        return hole
-
-# ------------------ UI ------------------
-def draw_speed(speed):
-    x,y=10,50
-    w,h=200,15
-
-    r=(speed-5)/(20-5)
-    r=max(0,min(1,r))
-
-    pygame.draw.rect(screen,(60,60,60),(x,y,w,h))
-    pygame.draw.rect(screen,(0,200,0),(x,y,w*r,h))
-    pygame.draw.rect(screen,WHITE,(x,y,w,h),2)
-
-    screen.blit(F.render(f"Speed:{speed}",True,WHITE),(x,y-25))
-
-def center_text(text,font,color,rect):
-    img=font.render(text,True,color)
-    screen.blit(img,
-                (rect.centerx-img.get_width()//2,
-                 rect.centery-img.get_height()//2))
-
-# ------------------ 그리기 ------------------
+# ------------------ 격자 ------------------
 def grid():
-    for x in range(0,WIDTH,CELL):
-        pygame.draw.line(screen,GRID,(x,0),(x,HEIGHT))
-    for y in range(0,HEIGHT,CELL):
-        pygame.draw.line(screen,GRID,(0,y),(WIDTH,y))
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
 
-def draw_snake(snake):
+    for x in range(0, WIDTH, CELL):
+        pygame.draw.line(overlay,(255,255,255,60),(x,0),(x,HEIGHT),2)
+
+    for y in range(0, HEIGHT, CELL):
+        pygame.draw.line(overlay,(255,255,255,60),(0,y),(WIDTH,y),2)
+
+    pygame.draw.rect(overlay,(255,255,255,140),(0,0,WIDTH,HEIGHT),3)
+    screen.blit(overlay,(0,0))
+
+# ------------------ 아이템 ------------------
+def draw_item(img,pos):
+    offset=(ITEM_SCALE-CELL)//2
+    screen.blit(img,(pos[0]-offset,pos[1]-offset))
+
+# ------------------ 위치 ------------------
+def safe_pos(snake,food,poisons,slow_items):
+    while True:
+        p=(random.randrange(MARGIN,GRID_WIDTH-MARGIN)*CELL,
+           random.randrange(MARGIN,GRID_HEIGHT-MARGIN)*CELL)
+        if p not in snake and p!=food and p not in poisons and p not in slow_items:
+            return p
+
+def respawn_items(snake):
+    food=safe_pos(snake,None,[],[])
+    poisons=[safe_pos(snake,food,[],[])]
+    slow_items=[safe_pos(snake,food,poisons,[])]
+    return food,poisons,slow_items
+
+def spawn_poison(snake,food,poisons,slow_items,max_p):
+    while len(poisons)<max_p:
+        poisons.append(safe_pos(snake,food,poisons,slow_items))
+
+# ------------------ 뱀 ------------------
+def draw_head(pos,d):
+    x,y=pos
+    pygame.draw.rect(screen,HEAD,(x,y,CELL,CELL),border_radius=6)
+
+    if d==(CELL,0): eyes=[(x+22,y+8),(x+22,y+22)]
+    elif d==(-CELL,0): eyes=[(x+8,y+8),(x+8,y+22)]
+    elif d==(0,-CELL): eyes=[(x+8,y+8),(x+22,y+8)]
+    else: eyes=[(x+8,y+22),(x+22,y+22)]
+
+    for ex,ey in eyes:
+        pygame.draw.circle(screen,BLACK,(ex,ey),4)
+
+def draw_snake(snake,d):
     for i,s in enumerate(snake):
-        c=DARK if i==0 else GREEN
-        pygame.draw.rect(screen,c,(*s,CELL,CELL))
-        pygame.draw.rect(screen,BLACK,(*s,CELL,CELL),1)
+        if i==0:
+            draw_head(s,d)
+        else:
+            pygame.draw.rect(screen,GREEN,(*s,CELL,CELL))
+            pygame.draw.rect(screen,BLACK,(*s,CELL,CELL),1)
 
-# ------------------ START ------------------
-def start_screen():
-    start_btn=pygame.Rect(WIDTH//2-150,HEIGHT//2,300,80)
-    info_btn=pygame.Rect(WIDTH//2-150,HEIGHT//2+120,300,80)
-
-    while True:
-        screen.fill(GRAY)
-
-        screen.blit(FB.render("SNAKE GAME",True,WHITE),
-                    (WIDTH//2-200,200))
-
-        mouse=pygame.mouse.get_pos()
-
-        pygame.draw.rect(screen,
-                         GREEN if start_btn.collidepoint(mouse) else (80,220,80),
-                         start_btn)
-
-        pygame.draw.rect(screen,
-                         WHITE if info_btn.collidepoint(mouse) else (200,200,200),
-                         info_btn)
-
-        center_text("START",F,BLACK,start_btn)
-        center_text("INFO",F,BLACK,info_btn)
-
-        pygame.display.flip()
-
-        for e in pygame.event.get():
-            if e.type==pygame.MOUSEBUTTONDOWN:
-                if start_btn.collidepoint(e.pos):
-                    return
-                if info_btn.collidepoint(e.pos):
-                    info_screen()
-            if e.type==pygame.QUIT:
-                pygame.quit();sys.exit()
-
-# ------------------ INFO (아이템 설명 포함) ------------------
-def info_screen():
-    while True:
-        screen.fill(GRAY)
-
-        screen.blit(FB.render("INFO",True,WHITE),(WIDTH//2-80,80))
-
-        y=180
-
-        screen.blit(apple_img,(WIDTH//2-220,y))
-        screen.blit(F.render("+10점 / 길이 증가",True,WHITE),(WIDTH//2-140,y+5))
-        y+=70
-
-        screen.blit(poison_img,(WIDTH//2-220,y))
-        screen.blit(F.render("-5점 / 길이 증가",True,WHITE),(WIDTH//2-140,y+5))
-        y+=70
-
-        screen.blit(fast_img,(WIDTH//2-220,y))
-        screen.blit(F.render("속도 증가",True,WHITE),(WIDTH//2-140,y+5))
-        y+=70
-
-        screen.blit(slow_img,(WIDTH//2-220,y))
-        screen.blit(F.render("속도 감소",True,WHITE),(WIDTH//2-140,y+5))
-        y+=70
-
-        screen.blit(pygame.transform.scale(hole_img,(40,40)),(WIDTH//2-220,y))
-        screen.blit(F.render("구멍 = GAME OVER",True,WHITE),(WIDTH//2-140,y+5))
-        y+=80
-
-        screen.blit(F.render("뱀 길이 25칸= 승리",True,YELLOW),(WIDTH//2-180,y))
-        screen.blit(F.render("ESC로 돌아가기",True,WHITE),(WIDTH//2-140,HEIGHT-80))
-
-        pygame.display.flip()
-
-        for e in pygame.event.get():
-            if e.type==pygame.KEYDOWN and e.key==pygame.K_ESCAPE:
-                return
-            if e.type==pygame.QUIT:
-                pygame.quit();sys.exit()
-
-# ------------------ GAME OVER ------------------
-def game_over_screen(score):
-    while True:
-        screen.fill(GRAY)
-
-        screen.blit(FB.render("GAME OVER",True,RED),
-                    (WIDTH//2-200,200))
-
-        screen.blit(F.render(f"Score: {score}",True,WHITE),
-                    (WIDTH//2-100,350))
-
-        screen.blit(F.render("CLICK TO RESTART",True,WHITE),
-                    (WIDTH//2-150,450))
-
-        pygame.display.flip()
-
-        for e in pygame.event.get():
-            if e.type==pygame.MOUSEBUTTONDOWN:
-                return
-            if e.type==pygame.QUIT:
-                pygame.quit();sys.exit()
+# ------------------ HUD ------------------
+def draw_hud(score,speed,elapsed):
+    m=elapsed//60
+    s=elapsed%60
+    screen.blit(font.render(f"Score:{score}",True,WHITE),(10,10))
+    screen.blit(font.render(f"Speed:{speed}",True,WHITE),(10,40))
+    screen.blit(font.render(f"Time:{m:02}:{s:02}",True,WHITE),(10,70))
 
 # ------------------ WIN ------------------
 def win_screen(score):
+    victory_music = pygame.mixer.Sound(resource_path("asset\retro_arcade_victory_music.mp3"))
+    victory_music.play(-1)
+    victory_music.set_volume(0.1)
+
     while True:
-        screen.fill(GRAY)
+        screen.fill((20,20,40))
 
-        screen.blit(FB.render("YOU WIN!",True,YELLOW),
-                    (WIDTH//2-160,200))
-
-        screen.blit(F.render(f"Score: {score}",True,WHITE),
-                    (WIDTH//2-100,350))
+        screen.blit(big_font.render("게임 승리!",True,WHITE),(WIDTH//2-160,200))
+        screen.blit(font.render(f"점수:{score}",True,WHITE),(WIDTH//2-80,300))
+        screen.blit(font.render("CLICK TO MENU",True,WHITE),(WIDTH//2-160,420))
 
         pygame.display.flip()
 
         for e in pygame.event.get():
+            if e.type==pygame.QUIT:
+                victory_music.stop()
+                pygame.quit()
+                sys.exit()
+
             if e.type==pygame.MOUSEBUTTONDOWN:
+                victory_music.stop()
+                return
+
+# ------------------ GAME OVER ------------------
+def game_over_screen(score):
+    bgm.stop()
+
+    over_music = pygame.mixer.Sound(resource_path("asset\game_over.mp3"))
+    over_music.play(-1)
+
+    while True:
+        screen.fill(GRAY)
+        screen.blit(big_font.render("게임 오버",True,(220,50,50)),(WIDTH//2-200,250))
+        screen.blit(font.render(f"Score:{score}",True,WHITE),(WIDTH//2-80,350))
+        screen.blit(font.render("CLICK TO RESTART",True,WHITE),(WIDTH//2-140,450))
+
+        pygame.display.flip()
+
+        for e in pygame.event.get():
+            if e.type==pygame.QUIT:
+                over_music.stop()
+                pygame.quit()
+                sys.exit()
+
+            if e.type==pygame.MOUSEBUTTONDOWN:
+                over_music.stop()
+                return
+
+# ------------------ START ------------------
+def start_screen():
+    start_btn=pygame.Rect(WIDTH//2-160,HEIGHT//2,140,70)
+    info_btn=pygame.Rect(WIDTH//2+20,HEIGHT//2,140,70)
+
+    pygame.event.clear()
+
+    while True:
+        screen.fill(GRAY)
+        screen.blit(big_font.render("Grow Snake Grow",True,WHITE),(WIDTH//2-200,250))
+
+        pygame.draw.rect(screen,(0,200,0),start_btn,border_radius=10)
+        pygame.draw.rect(screen,(0,120,255),info_btn,border_radius=10)
+
+        screen.blit(font.render("START",True,WHITE),(start_btn.x+25,start_btn.y+20))
+        screen.blit(font.render("INFO",True,WHITE),(info_btn.x+40,info_btn.y+20))
+
+        pygame.display.flip()
+
+        for e in pygame.event.get():
+            if e.type==pygame.QUIT:
+                pygame.quit();sys.exit()
+
+            if e.type==pygame.MOUSEBUTTONDOWN:
+                if start_btn.collidepoint(e.pos): return
+                if info_btn.collidepoint(e.pos): info_screen()
+
+# ------------------ INFO ------------------
+def info_screen():
+    pygame.event.clear()
+
+    while True:
+        screen.fill(GRAY)
+        screen.blit(big_font.render("INFO",True,WHITE),(WIDTH//2-80,120))
+
+        items=[
+            (apple_img," +10점, 길이 증가"),
+            (poison_img,"-5점, 길이 증가"),
+            (slow_img,"잠깐동안 게임 속도 감소")
+        ]
+
+        y=220
+        for img,text in items:
+            screen.blit(img,(WIDTH//2-220,y))
+            screen.blit(font.render(text,True,WHITE),(WIDTH//2-120,y+10))
+            y+=120
+
+        screen.blit(font.render("WIN:점수 0 이상 유지 ,뱀 길이 25칸",True,WHITE),(WIDTH//2-160,y+40))
+        screen.blit(font.render("CLICK TO BACK",True,WHITE),(WIDTH//2-120,y+100))
+
+        pygame.display.flip()
+
+        for e in pygame.event.get():
+            if e.type==pygame.QUIT:
+                pygame.quit();sys.exit()
+            if e.type==pygame.MOUSEBUTTONDOWN:
+                pygame.event.clear()
                 return
 
 # ------------------ GAME ------------------
 def main():
-    snake=[(GRID_WIDTH//2*CELL,GRID_HEIGHT//2*CELL)]
+    bgm.play(-1)
+
+    snake=[((GRID_WIDTH//2)*CELL,(GRID_HEIGHT//2)*CELL)]
     d=(CELL,0)
-
     speed=BASE_SPEED
-    score=0
 
-    food=rand_pos()
-    poisons=new_items(POISON_COUNT,snake,[food])
-    speed_items=new_items(SPEED_COUNT,snake,[food])
-    slow_items=new_items(SLOW_COUNT,snake,[food])
+    score=15
 
-    hole=create_hole(snake,food,poisons,speed_items,slow_items)
-    hole_timer=15
+    start_time=pygame.time.get_ticks()
+    last_speed=start_time
+
+    food,poisons,slow_items=respawn_items(snake)
+    slow_end=0
 
     while True:
-        dt=clock.tick(speed)/1000
-        hole_timer-=dt
+        now=pygame.time.get_ticks()
+        elapsed=(now-start_time)//1000
 
-        if hole_timer<=0:
-            hole=create_hole(snake,food,poisons,speed_items,slow_items)
-            hole_timer=15
+        if now-last_speed>SPEED_UP_TIME:
+            speed=min(MAX_SPEED,speed+1)
+            last_speed=now
 
         for e in pygame.event.get():
-            if e.type==pygame.QUIT:
-                pygame.quit();sys.exit()
             if e.type==pygame.KEYDOWN:
-                if e.key==pygame.K_UP and d!=(0,CELL):d=(0,-CELL)
-                if e.key==pygame.K_DOWN and d!=(0,-CELL):d=(0,CELL)
-                if e.key==pygame.K_LEFT and d!=(CELL,0):d=(-CELL,0)
-                if e.key==pygame.K_RIGHT and d!=(-CELL,0):d=(CELL,0)
+                if e.key==pygame.K_UP and d!=(0,CELL): d=(0,-CELL)
+                if e.key==pygame.K_DOWN and d!=(0,-CELL): d=(0,CELL)
+                if e.key==pygame.K_LEFT and d!=(CELL,0): d=(-CELL,0)
+                if e.key==pygame.K_RIGHT and d!=(-CELL,0): d=(CELL,0)
+
+                if e.key==pygame.K_F5:
+                    snake.append(snake[-1])
 
         head=(snake[0][0]+d[0],snake[0][1]+d[1])
 
-        # 충돌
-        if head[0]<0 or head[0]>=WIDTH or head[1]<0 or head[1]>=HEIGHT:
-            game_over_screen(score);return
-
-        if hole.collidepoint(head):
-            game_over_screen(score);return
-
-        if head in snake:
-            game_over_screen(score);return
+        if head in snake or head[0]<0 or head[1]<0 or head[0]>=WIDTH or head[1]>=HEIGHT:
+            game_over_screen(score)
+            return
 
         snake.insert(0,head)
-
         ate=False
 
         if head==food:
+            eat_sound.play()
             score+=10
-            food=rand_pos()
+            food,poisons,slow_items=respawn_items(snake)
             ate=True
 
-        if head in poisons:
-            score=max(0,score-5)
-            poisons.remove(head)
-            poisons+=new_items(1,snake,[food])
-            ate=True
+        max_p=1+(len(snake)//3)
+        spawn_poison(snake,food,poisons,slow_items,max_p)
 
-        if head in speed_items:
-            speed+=2
-            speed_items.remove(head)
-            speed_items+=new_items(1,snake,[food])
-            ate=True
+        for p in poisons[:]:
+            if head==p:
+                eat_sound.play()
+                score-=5
+                poisons.remove(p)
+                spawn_poison(snake,food,poisons,slow_items,max_p)
+                ate=True
 
-        if head in slow_items:
-            speed=max(3,speed-2)
-            slow_items.remove(head)
-            slow_items+=new_items(1,snake,[food])
-            ate=True
+                if score<0:
+                    game_over_screen(score)
+                    return
+
+        if head in slow_items and now>slow_end:
+            slowdown_sound.play()
+            slow_end=now+SLOW_DURATION
+            food,poisons,slow_items=respawn_items(snake)
+
+        current_speed=int(speed*SLOW_FACTOR) if now<slow_end else speed
+        clock.tick(current_speed)
+
+        if len(snake)>=WIN_LENGTH:
+            bgm.stop()
+            win_screen(score)
+            return
 
         if not ate:
             snake.pop()
 
-        if len(snake)>=WIN_LENGTH:
-            win_screen(score);return
-
-        # DRAW
-        screen.fill(GRAY)
+        screen.blit(background_img,(0,0))
         grid()
 
-        screen.blit(apple_img,food)
-        for p in poisons:screen.blit(poison_img,p)
-        for s in speed_items:screen.blit(fast_img,s)
-        for s in slow_items:screen.blit(slow_img,s)
+        draw_item(apple_img,food)
+        for p in poisons:
+            draw_item(poison_img,p)
+        for s in slow_items:
+            draw_item(slow_img,s)
 
-        screen.blit(pygame.transform.scale(hole_img,(hole.width,hole.height)),
-                    (hole.x,hole.y))
-
-        draw_snake(snake)
-
-        screen.blit(F.render(f"Score:{score}",True,WHITE),(10,10))
-        draw_speed(speed)
+        draw_snake(snake,d)
+        draw_hud(score,current_speed,elapsed)
 
         pygame.display.flip()
 
