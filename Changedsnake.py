@@ -6,35 +6,42 @@ pygame.init()
 
 # ------------------ 설정 ------------------
 WIDTH, HEIGHT = 1000, 700
+MAP_WIDTH, MAP_HEIGHT = 3000, 3000
 CELL = 25
 
 FPS = 60
 SPEED = 220
 ENEMY_SPEED = 120
-ENEMY_COUNT = 3
+ENEMY_COUNT = 2
 
 PROJECTILE_SPEED = 400
 PROJECTILE_SIZE = 18
 PROJECTILE_DAMAGE = 5
-PROJECTILE_COOLDOWN = 2000  # ms
+PROJECTILE_COOLDOWN = 2000
 
 WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
 GREEN = (50, 200, 50)
 GRAY = (40, 40, 40)
 SWORD = (220, 220, 220)
 RED = (200, 50, 50)
 YELLOW = (255, 220, 0)
 BLUE = (80, 180, 255)
+PURPLE = (180, 80, 255)
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Zelda Final")
+pygame.display.set_caption("Zelda Field Final")
 
 clock = pygame.time.Clock()
 
+# ------------------ 카메라 ------------------
+camera_x = 0
+camera_y = 0
+DEADZONE_W = 300
+DEADZONE_H = 200
+
 # ------------------ 플레이어 ------------------
-player_x = WIDTH // 2
-player_y = HEIGHT // 2
+player_x = MAP_WIDTH // 2
+player_y = MAP_HEIGHT // 2
 direction = (0, -1)
 
 player_hp = 5
@@ -51,26 +58,56 @@ attack_dir = (0, -1)
 cooldown_timer = 0
 cooldown = 250
 
+hit_enemies = set()
+
 # ------------------ 검기 ------------------
 projectiles = []
 projectile_cooldown_timer = 0
 
 # ------------------ 적 ------------------
 enemies = []
+
 for _ in range(ENEMY_COUNT):
     enemies.append({
-        "x": random.randrange(0, WIDTH - CELL),
-        "y": random.randrange(0, HEIGHT - CELL),
+        "type": "normal",
+        "x": random.randrange(0, MAP_WIDTH - CELL),
+        "y": random.randrange(0, MAP_HEIGHT - CELL),
         "hp": 3,
+        "max_hp": 3,
         "hit": 0
     })
 
+enemies.append({
+    "type": "elite",
+    "x": random.randrange(0, MAP_WIDTH - CELL),
+    "y": random.randrange(0, MAP_HEIGHT - CELL),
+    "hp": 6,
+    "max_hp": 6,
+    "hit": 0,
+    "state": "chase",
+    "charge_timer": 0,
+    "dash_timer": 0,
+    "dx": 0,
+    "dy": 0
+})
+
+# ------------------ 상태 ------------------
+game_clear = False
+
+# 히트스톱
+hitstop_timer = 0
+HITSTOP_TIME = 80
+
 # ------------------ 함수 ------------------
 def draw_grid():
-    for x in range(0, WIDTH, CELL):
-        pygame.draw.line(screen, (60, 60, 60), (x, 0), (x, HEIGHT))
-    for y in range(0, HEIGHT, CELL):
-        pygame.draw.line(screen, (60, 60, 60), (0, y), (WIDTH, y))
+    for x in range(0, MAP_WIDTH, CELL):
+        pygame.draw.line(screen, (60, 60, 60),
+            (x - camera_x, 0 - camera_y),
+            (x - camera_x, MAP_HEIGHT - camera_y))
+    for y in range(0, MAP_HEIGHT, CELL):
+        pygame.draw.line(screen, (60, 60, 60),
+            (0 - camera_x, y - camera_y),
+            (MAP_WIDTH - camera_x, y - camera_y))
 
 def clamp(val, minv, maxv):
     return max(minv, min(val, maxv))
@@ -79,26 +116,28 @@ def clamp(val, minv, maxv):
 while True:
     dt = clock.tick(FPS) / 1000
 
+    # 히트스톱
+    if hitstop_timer > 0:
+        hitstop_timer -= dt * 1000
+        dt = 0
+
     # 이벤트
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
 
-        if e.type == pygame.KEYDOWN:
+        if e.type == pygame.KEYDOWN and not game_clear:
             if e.key == pygame.K_SPACE:
                 if attack_timer <= 0 and cooldown_timer <= 0:
                     attack_timer = attack_duration
                     attack_dir = direction
                     cooldown_timer = cooldown
+                    hit_enemies.clear()
 
-                    # 🔥 검기 생성 위치 수정
                     if player_hp == MAX_HP and projectile_cooldown_timer <= 0:
-                        spawn_x = player_x + attack_dir[0] * CELL
-                        spawn_y = player_y + attack_dir[1] * CELL
-
-                        spawn_x += CELL // 2 - PROJECTILE_SIZE // 2
-                        spawn_y += CELL // 2 - PROJECTILE_SIZE // 2
+                        spawn_x = player_x + attack_dir[0] * CELL + (CELL - PROJECTILE_SIZE) / 2
+                        spawn_y = player_y + attack_dir[1] * CELL + (CELL - PROJECTILE_SIZE) / 2
 
                         projectiles.append({
                             "x": spawn_x,
@@ -113,93 +152,109 @@ while True:
     keys = pygame.key.get_pressed()
     dx, dy = 0, 0
 
-    if keys[pygame.K_w]:
-        dx, dy = 0, -1
-    elif keys[pygame.K_s]:
-        dx, dy = 0, 1
-    elif keys[pygame.K_a]:
-        dx, dy = -1, 0
-    elif keys[pygame.K_d]:
-        dx, dy = 1, 0
+    if not game_clear:
+        if keys[pygame.K_w]:
+            dx, dy = 0, -1
+        elif keys[pygame.K_s]:
+            dx, dy = 0, 1
+        elif keys[pygame.K_a]:
+            dx, dy = -1, 0
+        elif keys[pygame.K_d]:
+            dx, dy = 1, 0
 
-    if dx != 0 or dy != 0:
-        direction = (dx, dy)
+        if dx != 0 or dy != 0:
+            direction = (dx, dy)
 
-    player_x += dx * SPEED * dt
-    player_y += dy * SPEED * dt
+        player_x += dx * SPEED * dt
+        player_y += dy * SPEED * dt
 
-    player_x = clamp(player_x, 0, WIDTH - CELL)
-    player_y = clamp(player_y, 0, HEIGHT - CELL)
+    player_x = clamp(player_x, 0, MAP_WIDTH - CELL)
+    player_y = clamp(player_y, 0, MAP_HEIGHT - CELL)
 
-    player_rect = pygame.Rect(player_x, player_y, CELL, CELL)
+    player_rect = pygame.Rect(int(player_x), int(player_y), CELL, CELL)
+
+    # 🎯 소프트 카메라
+    player_screen_x = player_x - camera_x
+    player_screen_y = player_y - camera_y
+
+    left = WIDTH // 2 - DEADZONE_W // 2
+    right = WIDTH // 2 + DEADZONE_W // 2
+    top = HEIGHT // 2 - DEADZONE_H // 2
+    bottom = HEIGHT // 2 + DEADZONE_H // 2
+
+    if player_screen_x < left:
+        camera_x -= (left - player_screen_x)
+    elif player_screen_x > right:
+        camera_x += (player_screen_x - right)
+
+    if player_screen_y < top:
+        camera_y -= (top - player_screen_y)
+    elif player_screen_y > bottom:
+        camera_y += (player_screen_y - bottom)
+
+    camera_x = clamp(camera_x, 0, MAP_WIDTH - WIDTH)
+    camera_y = clamp(camera_y, 0, MAP_HEIGHT - HEIGHT)
 
     # ------------------ 적 AI ------------------
     for enemy in enemies:
         diff_x = player_x - enemy["x"]
         diff_y = player_y - enemy["y"]
+        dist = (diff_x**2 + diff_y**2) ** 0.5
 
-        if abs(diff_x) > abs(diff_y):
-            move_x = 1 if diff_x > 0 else -1
-            move_y = 0
-        else:
-            move_x = 0
-            move_y = 1 if diff_y > 0 else -1
+        if enemy["type"] == "normal":
+            if dist != 0:
+                enemy["x"] += (diff_x / dist) * ENEMY_SPEED * dt
+                enemy["y"] += (diff_y / dist) * ENEMY_SPEED * dt
 
-        enemy["x"] += move_x * ENEMY_SPEED * dt
-        enemy["y"] += move_y * ENEMY_SPEED * dt
+        elif enemy["type"] == "elite":
+            if enemy["state"] == "chase":
+                if dist != 0:
+                    enemy["x"] += (diff_x / dist) * ENEMY_SPEED * dt
+                    enemy["y"] += (diff_y / dist) * ENEMY_SPEED * dt
 
-    # ------------------ 🔥 적끼리 충돌 방지 ------------------
-    for i in range(len(enemies)):
-        for j in range(i + 1, len(enemies)):
-            e1 = enemies[i]
-            e2 = enemies[j]
+                enemy["charge_timer"] += dt * 1000
+                if enemy["charge_timer"] > 1500:
+                    enemy["state"] = "charge"
+                    enemy["charge_timer"] = 400
+                    if dist != 0:
+                        enemy["dx"] = diff_x / dist
+                        enemy["dy"] = diff_y / dist
 
-            dx = e1["x"] - e2["x"]
-            dy = e1["y"] - e2["y"]
+            elif enemy["state"] == "charge":
+                enemy["charge_timer"] -= dt * 1000
+                if enemy["charge_timer"] <= 0:
+                    enemy["state"] = "dash"
+                    enemy["dash_timer"] = 300
 
-            dist_sq = dx * dx + dy * dy
-            min_dist = CELL
+            elif enemy["state"] == "dash":
+                enemy["x"] += enemy["dx"] * 400 * dt
+                enemy["y"] += enemy["dy"] * 400 * dt
+                enemy["dash_timer"] -= dt * 1000
 
-            if dist_sq < min_dist * min_dist and dist_sq != 0:
-                dist = dist_sq ** 0.5
+                if enemy["dash_timer"] <= 0:
+                    enemy["state"] = "chase"
 
-                overlap = (min_dist - dist) / 2
-                nx = dx / dist
-                ny = dy / dist
+        enemy["x"] = clamp(enemy["x"], 0, MAP_WIDTH - CELL)
+        enemy["y"] = clamp(enemy["y"], 0, MAP_HEIGHT - CELL)
 
-                e1["x"] += nx * overlap
-                e1["y"] += ny * overlap
-                e2["x"] -= nx * overlap
-                e2["y"] -= ny * overlap
-
-    # ------------------ 검기 이동 ------------------
+    # ------------------ 검기 ------------------
     for proj in projectiles:
         proj["x"] += proj["dx"] * PROJECTILE_SPEED * dt
         proj["y"] += proj["dy"] * PROJECTILE_SPEED * dt
 
-    projectiles = [
-        p for p in projectiles
-        if 0 <= p["x"] <= WIDTH and 0 <= p["y"] <= HEIGHT
-    ]
+    projectiles = [p for p in projectiles if 0 <= p["x"] <= MAP_WIDTH and 0 <= p["y"] <= MAP_HEIGHT]
 
     # ------------------ 타이머 ------------------
-    if attack_timer > 0:
-        attack_timer -= dt * 1000
+    attack_timer -= dt * 1000 if attack_timer > 0 else 0
+    cooldown_timer -= dt * 1000 if cooldown_timer > 0 else 0
+    invincible_timer -= dt * 1000 if invincible_timer > 0 else 0
+    projectile_cooldown_timer -= dt * 1000 if projectile_cooldown_timer > 0 else 0
 
-    if cooldown_timer > 0:
-        cooldown_timer -= dt * 1000
-
-    if invincible_timer > 0:
-        invincible_timer -= dt * 1000
-
-    if projectile_cooldown_timer > 0:
-        projectile_cooldown_timer -= dt * 1000
-
-    # ------------------ 공격 범위 ------------------
+    # ------------------ 공격 ------------------
     attack_rect = None
     if attack_timer > 0:
-        ax = player_x + attack_dir[0] * CELL
-        ay = player_y + attack_dir[1] * CELL
+        ax = int(player_x + attack_dir[0] * CELL)
+        ay = int(player_y + attack_dir[1] * CELL)
 
         if attack_dir[1] != 0:
             attack_rect = pygame.Rect(ax + CELL // 4, ay, CELL // 2, CELL)
@@ -207,74 +262,82 @@ while True:
             attack_rect = pygame.Rect(ax, ay + CELL // 4, CELL, CELL // 2)
 
     # ------------------ 충돌 ------------------
-    for enemy in enemies[:]:
-        enemy_rect = pygame.Rect(enemy["x"], enemy["y"], CELL, CELL)
+    for enemy in enemies:
+        enemy_rect = pygame.Rect(int(enemy["x"]), int(enemy["y"]), CELL, CELL)
 
-        # 근접 공격
         if attack_rect and attack_rect.colliderect(enemy_rect):
-            enemy["hp"] -= 1
-            enemy["hit"] = 100
-            enemy["x"] += attack_dir[0] * 40
-            enemy["y"] += attack_dir[1] * 40
+            if id(enemy) not in hit_enemies:
+                enemy["hp"] -= 1
+                enemy["hit"] = 100
+                hit_enemies.add(id(enemy))
+                hitstop_timer = HITSTOP_TIME
 
-        # 검기 공격
         for proj in projectiles[:]:
-            proj_rect = pygame.Rect(proj["x"], proj["y"], PROJECTILE_SIZE, PROJECTILE_SIZE)
+            proj_rect = pygame.Rect(int(proj["x"]), int(proj["y"]), PROJECTILE_SIZE, PROJECTILE_SIZE)
             if proj_rect.colliderect(enemy_rect):
                 enemy["hp"] -= PROJECTILE_DAMAGE
                 enemy["hit"] = 100
-                enemy["x"] += proj["dx"] * 80
-                enemy["y"] += proj["dy"] * 80
                 projectiles.remove(proj)
+                hitstop_timer = HITSTOP_TIME
 
-        # 플레이어 피격
         if player_rect.colliderect(enemy_rect):
             if invincible_timer <= 0:
-                player_hp -= 1
+                damage = 2 if enemy["type"] == "elite" and enemy.get("state") == "dash" else 1
+                player_hp -= damage
                 invincible_timer = invincible_time
+                hitstop_timer = HITSTOP_TIME
 
-        if enemy["hp"] <= 0:
-            enemies.remove(enemy)
+    enemies = [e for e in enemies if e["hp"] > 0]
+
+    if not enemies and not game_clear:
+        game_clear = True
 
     # ------------------ 그리기 ------------------
     screen.fill(GRAY)
     draw_grid()
 
-    # 적
     for enemy in enemies:
-        color = YELLOW if enemy["hit"] > 0 else RED
-        pygame.draw.rect(screen, color, (enemy["x"], enemy["y"], CELL, CELL))
+        color = PURPLE if enemy["type"] == "elite" and enemy["state"] == "dash" else (
+            BLUE if enemy["type"] == "elite" else (YELLOW if enemy["hit"] > 0 else RED))
+
+        pygame.draw.rect(screen, color,
+            (int(enemy["x"] - camera_x), int(enemy["y"] - camera_y), CELL, CELL))
 
         if enemy["hit"] > 0:
             enemy["hit"] -= dt * 1000
 
-    # 검기
+        hp_ratio = enemy["hp"] / enemy["max_hp"]
+        pygame.draw.rect(screen, (60, 60, 60),
+            (int(enemy["x"] - camera_x), int(enemy["y"] - camera_y - 8), CELL, 5))
+        pygame.draw.rect(screen, GREEN,
+            (int(enemy["x"] - camera_x), int(enemy["y"] - camera_y - 8), int(CELL * hp_ratio), 5))
+
     for proj in projectiles:
         pygame.draw.rect(screen, BLUE,
-                         (int(proj["x"]), int(proj["y"]), PROJECTILE_SIZE, PROJECTILE_SIZE))
+            (int(proj["x"] - camera_x), int(proj["y"] - camera_y), PROJECTILE_SIZE, PROJECTILE_SIZE))
 
-    # 공격
     if attack_rect:
-        pygame.draw.rect(screen, SWORD, attack_rect)
+        pygame.draw.rect(screen, SWORD,
+            (attack_rect.x - camera_x, attack_rect.y - camera_y,
+             attack_rect.width, attack_rect.height))
 
-    # 플레이어
-    color = WHITE if invincible_timer > 0 and int(invincible_timer / 100) % 2 == 0 else GREEN
-    pygame.draw.rect(screen, color, (player_x, player_y, CELL, CELL))
+    color = GREEN
+    if invincible_timer > 0 and int(invincible_timer / 100) % 2 == 0:
+        color = WHITE
 
-    # 체력
+    pygame.draw.rect(screen, color,
+        (int(player_x - camera_x), int(player_y - camera_y), CELL, CELL))
+
     for i in range(player_hp):
         pygame.draw.rect(screen, RED, (10 + i * 30, 30, 20, 20))
 
-    # ALL CLEAR
-    if len(enemies) == 0:
+    if game_clear:
         font = pygame.font.SysFont(None, 80)
         text = font.render("ALL CLEAR!", True, WHITE)
         screen.blit(text, (WIDTH // 2 - 180, HEIGHT // 2 - 40))
 
     pygame.display.flip()
 
-    # 게임 오버
     if player_hp <= 0:
-        print("GAME OVER")
         pygame.quit()
         sys.exit()
