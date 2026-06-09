@@ -6,7 +6,11 @@ pygame.init()
 
 # ------------------ 기본 설정 ------------------
 WIDTH, HEIGHT = 1000, 700
-ROOM_WIDTH, ROOM_HEIGHT = 1200, 800
+
+# 방 크기를 화면 크기와 같게 줄임
+# 카메라 기능은 그대로 유지됨
+ROOM_WIDTH, ROOM_HEIGHT = 1000, 700
+
 CELL = 25
 FPS = 60
 
@@ -80,7 +84,7 @@ DEADZONE_W = 300
 DEADZONE_H = 200
 
 # ------------------ 플레이어 ------------------
-player_x = 80
+player_x = 100
 player_y = ROOM_HEIGHT // 2
 direction = (1, 0)
 
@@ -117,37 +121,37 @@ rooms = [
     {
         "name": "Room 1 - Tutorial",
         "enemies": [
-            ("normal", 420, 300),
-            ("normal", 550, 420),
-            ("normal", 720, 330),
+            ("normal", 380, 260),
+            ("normal", 520, 390),
+            ("normal", 680, 280),
         ],
         "reward_items": []
     },
     {
         "name": "Room 2 - Dash Enemy",
         "enemies": [
-            ("normal", 420, 300),
-            ("normal", 520, 450),
-            ("strong_dash", 760, 360),
+            ("normal", 360, 250),
+            ("normal", 500, 430),
+            ("strong_dash", 700, 330),
         ],
         "reward_items": []
     },
     {
         "name": "Room 3 - Shooter Enemy",
         "enemies": [
-            ("normal", 390, 300),
-            ("normal", 500, 480),
-            ("strong_shooter", 760, 360),
+            ("normal", 350, 250),
+            ("normal", 500, 430),
+            ("strong_shooter", 700, 330),
         ],
         "reward_items": []
     },
     {
         "name": "Room 4 - Mixed Battle",
         "enemies": [
-            ("normal", 350, 280),
-            ("normal", 450, 500),
-            ("strong_dash", 700, 300),
-            ("strong_shooter", 850, 480),
+            ("normal", 330, 230),
+            ("normal", 430, 450),
+            ("strong_dash", 650, 270),
+            ("strong_shooter", 760, 430),
         ],
         "reward_items": []
     },
@@ -155,19 +159,19 @@ rooms = [
         "name": "Room 5 - Reward Room",
         "enemies": [],
         "reward_items": [
-            ("heal", 500, 360),
-            ("sword_up", 600, 360),
-            ("projectile_up", 700, 360),
+            ("heal", 420, 330),
+            ("sword_up", 520, 330),
+            ("projectile_up", 620, 330),
         ]
     },
     {
         "name": "Room 6 - Final Room",
         "enemies": [
-            ("normal", 350, 250),
-            ("normal", 400, 520),
-            ("normal", 600, 400),
-            ("strong_dash", 780, 280),
-            ("strong_shooter", 880, 500),
+            ("normal", 330, 220),
+            ("normal", 380, 480),
+            ("normal", 520, 350),
+            ("strong_dash", 660, 260),
+            ("strong_shooter", 760, 440),
         ],
         "reward_items": []
     },
@@ -261,12 +265,12 @@ def load_room(index):
 
     room_cleared = len(enemies) == 0
 
-    player_x = 80
+    player_x = 100
     player_y = ROOM_HEIGHT // 2
     direction = (1, 0)
 
     camera_x = 0
-    camera_y = clamp(player_y - HEIGHT // 2, 0, ROOM_HEIGHT - HEIGHT)
+    camera_y = clamp(player_y - HEIGHT // 2, 0, max(0, ROOM_HEIGHT - HEIGHT))
 
     attack_timer = 0
     cooldown_timer = 0
@@ -611,8 +615,8 @@ while True:
     elif player_screen_y > bottom:
         camera_y += player_screen_y - bottom
 
-    camera_x = clamp(camera_x, 0, ROOM_WIDTH - WIDTH)
-    camera_y = clamp(camera_y, 0, ROOM_HEIGHT - HEIGHT)
+    camera_x = clamp(camera_x, 0, max(0, ROOM_WIDTH - WIDTH))
+    camera_y = clamp(camera_y, 0, max(0, ROOM_HEIGHT - HEIGHT))
 
     # ------------------ 방 클리어 / 문 이동 ------------------
     if len(enemies) == 0:
